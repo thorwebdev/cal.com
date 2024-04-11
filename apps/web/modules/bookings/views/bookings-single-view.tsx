@@ -31,6 +31,7 @@ import {
   TITLE_FIELD,
 } from "@calcom/features/bookings/lib/SystemField";
 import { APP_NAME } from "@calcom/lib/constants";
+import { BOOKED_WITH_SMS_EMAIL } from "@calcom/lib/constants";
 import {
   formatToLocalizedDate,
   formatToLocalizedTime,
@@ -521,7 +522,7 @@ export default function Success(props: PageProps) {
                                       {attendee.phoneNumber}
                                     </p>
                                   )}
-                                  {!isEmailHidden && (
+                                  {attendee.email !== BOOKED_WITH_SMS_EMAIL && (
                                     <p data-testid={`attendee-email-${attendee.email}`}>{attendee.email}</p>
                                   )}
                                 </div>

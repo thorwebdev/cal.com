@@ -4,7 +4,13 @@ import type { TFunction } from "next-i18next";
 
 import type { EventNameObjectType } from "@calcom/core/event";
 import { getEventName } from "@calcom/core/event";
+import dayjs from "@calcom/dayjs";
 import type BaseEmail from "@calcom/emails/templates/_base-email";
+import { getSenderId } from "@calcom/features/ee/workflows/lib/alphanumericSenderIdSupport.ts";
+import * as twilio from "@calcom/features/ee/workflows/lib/reminders/providers/twilioProvider.ts";
+import { SENDER_ID } from "@calcom/lib/constants";
+import { WEBAPP_URL } from "@calcom/lib/constants";
+import { TimeFormat } from "@calcom/lib/timeFormat";
 import type { CalendarEvent, Person } from "@calcom/types/Calendar";
 
 import type { MonthlyDigestEmailData } from "./src/templates/MonthlyDigestEmail";
@@ -73,20 +79,20 @@ export const sendScheduledEmails = async (
   hostEmailDisabled?: boolean,
   attendeeEmailDisabled?: boolean
 ) => {
-  const emailsToSend: Promise<unknown>[] = [];
+  const emailsAndSmsToSend: Promise<unknown>[] = [];
 
   if (!hostEmailDisabled) {
-    emailsToSend.push(sendEmail(() => new OrganizerScheduledEmail({ calEvent })));
+    emailsAndSmsToSend.push(sendEmail(() => new OrganizerScheduledEmail({ calEvent })));
 
     if (calEvent.team) {
       for (const teamMember of calEvent.team.members) {
-        emailsToSend.push(sendEmail(() => new OrganizerScheduledEmail({ calEvent, teamMember })));
+        emailsAndSmsToSend.push(sendEmail(() => new OrganizerScheduledEmail({ calEvent, teamMember })));
       }
     }
   }
 
   if (!attendeeEmailDisabled) {
-    emailsToSend.push(
+    emailsAndSmsToSend.push(
       ...calEvent.attendees.map((attendee) => {
         return sendEmail(
           () =>
@@ -105,7 +111,30 @@ export const sendScheduledEmails = async (
     );
   }
 
-  await Promise.all(emailsToSend);
+  // Send Attendees SMS here
+  for (const attendee of calEvent.attendees) {
+    const attendeePhoneNumber = attendee.phoneNumber;
+    if (attendeePhoneNumber) {
+      const senderID = getSenderId(attendeePhoneNumber, SENDER_ID);
+
+      function getFormattedTime(time: string, format: string) {
+        return dayjs(time).tz(attendee.timeZone).locale(attendee.language.locale).format(format);
+      }
+
+      const smsMessage = `Hey ${attendee.name}, confirming your booking on  ${getFormattedTime(
+        calEvent.startTime,
+        `dddd, LL | ${TimeFormat.TWELVE_HOUR}`
+      )} - ${getFormattedTime(calEvent.endTime, TimeFormat.TWELVE_HOUR)} (${
+        attendee.timeZone
+      }) . \n\n You can add the event to your calendar from this url ${
+        calEvent.bookerUrl ?? WEBAPP_URL
+      }/booking/${calEvent.uid} `;
+
+      emailsAndSmsToSend.push(twilio.sendSMS(attendeePhoneNumber, smsMessage, senderID));
+    }
+  }
+
+  await Promise.all(emailsAndSmsToSend);
 };
 
 // for rescheduled round robin booking that assigned new members
